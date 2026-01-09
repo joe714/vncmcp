@@ -8,11 +8,25 @@ allowed-tools: Bash, Read, Glob
 
 This skill allows you to connect to VNC (Virtual Network Computing) servers and interact with remote desktops. You can view the screen, click on elements, type text, and perform complex mouse/keyboard operations.
 
+## First-Time Setup (Required)
+
+On first use, you MUST create a virtual environment and install dependencies. Run these commands:
+
+```bash
+# Create venv in the skill directory
+python3 -m venv .claude/skills/vnc-server/venv
+
+# Install dependencies
+.claude/skills/vnc-server/venv/bin/pip install -r .claude/skills/vnc-server/requirements.txt
+```
+
+This only needs to be done once. The venv will persist for future sessions.
+
 ## Prerequisites
 
 Before using this skill, ensure:
 1. Python 3.7+ is installed
-2. The `pycryptodome` package is installed (for VNC authentication): `pip install pycryptodome`
+2. **First-time setup completed** (see above)
 3. You have VNC server connection details (host, port, and optionally password)
 
 ## Quick Start
@@ -20,19 +34,19 @@ Before using this skill, ensure:
 ### 1. Connect to a VNC Server
 
 ```bash
-python .claude/skills/vnc-server/scripts/vnc_connect.py <host> <port> [--password <password>]
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_connect.py <host> <port> [--password <password>]
 ```
 
 Example:
 ```bash
-python .claude/skills/vnc-server/scripts/vnc_connect.py localhost 5900
-python .claude/skills/vnc-server/scripts/vnc_connect.py 192.168.1.100 5901 --password mysecret
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_connect.py localhost 5900
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_connect.py 192.168.1.100 5901 --password mysecret
 ```
 
 ### 2. Take a Screenshot
 
 ```bash
-python .claude/skills/vnc-server/scripts/vnc_screenshot.py
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_screenshot.py
 ```
 
 The screenshot is saved as a PNG file and the path is returned. Use the Read tool to view the screenshot image.
@@ -41,44 +55,44 @@ The screenshot is saved as a PNG file and the path is returned. Use the Read too
 
 ```bash
 # Single click at coordinates
-python .claude/skills/vnc-server/scripts/vnc_mouse.py click <x> <y>
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_mouse.py click <x> <y>
 
 # Double-click
-python .claude/skills/vnc-server/scripts/vnc_mouse.py double-click <x> <y>
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_mouse.py double-click <x> <y>
 
 # Right-click
-python .claude/skills/vnc-server/scripts/vnc_mouse.py click <x> <y> --button 3
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_mouse.py click <x> <y> --button 3
 
 # Move mouse
-python .claude/skills/vnc-server/scripts/vnc_mouse.py move <x> <y>
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_mouse.py move <x> <y>
 
 # Drag from one point to another
-python .claude/skills/vnc-server/scripts/vnc_mouse.py drag <start_x> <start_y> <end_x> <end_y>
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_mouse.py drag <start_x> <start_y> <end_x> <end_y>
 
 # Scroll
-python .claude/skills/vnc-server/scripts/vnc_mouse.py scroll <x> <y> up --amount 5
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_mouse.py scroll <x> <y> up --amount 5
 ```
 
 ### 4. Type Text and Send Keys
 
 ```bash
 # Type text
-python .claude/skills/vnc-server/scripts/vnc_keyboard.py type "Hello World"
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_keyboard.py type "Hello World"
 
 # Press a single key
-python .claude/skills/vnc-server/scripts/vnc_keyboard.py key Return
-python .claude/skills/vnc-server/scripts/vnc_keyboard.py key Escape
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_keyboard.py key Return
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_keyboard.py key Escape
 
 # Key combinations
-python .claude/skills/vnc-server/scripts/vnc_keyboard.py key ctrl+c
-python .claude/skills/vnc-server/scripts/vnc_keyboard.py key ctrl+shift+s
-python .claude/skills/vnc-server/scripts/vnc_keyboard.py key alt+F4
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_keyboard.py key ctrl+c
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_keyboard.py key ctrl+shift+s
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_keyboard.py key alt+F4
 ```
 
 ### 5. Check Connection Status
 
 ```bash
-python .claude/skills/vnc-server/scripts/vnc_status.py
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_status.py
 ```
 
 ### 6. Monitor Session in Browser (Optional)
@@ -86,7 +100,7 @@ python .claude/skills/vnc-server/scripts/vnc_status.py
 Start a web-based monitor to view the VNC session in real-time:
 
 ```bash
-python .claude/skills/vnc-server/scripts/vnc_monitor.py
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_monitor.py
 ```
 
 Then open http://localhost:8080 in your browser to watch the session.
@@ -101,7 +115,7 @@ The monitor is **read-only** - it shows the screen but doesn't capture input. Al
 ### 7. Disconnect
 
 ```bash
-python .claude/skills/vnc-server/scripts/vnc_disconnect.py
+.claude/skills/vnc-server/venv/bin/python .claude/skills/vnc-server/scripts/vnc_disconnect.py
 ```
 
 ## Supported Keys
