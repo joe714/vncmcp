@@ -1,0 +1,5 @@
+# VNC Server Skill Dependencies
+# Install with: pip install -r requirements.txt
+
+# Required for VNC authentication (DES encryption)
+pycryptodome>=3.9.0
