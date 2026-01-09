@@ -81,7 +81,24 @@ python .claude/skills/vnc-server/scripts/vnc_keyboard.py key alt+F4
 python .claude/skills/vnc-server/scripts/vnc_status.py
 ```
 
-### 6. Disconnect
+### 6. Monitor Session in Browser (Optional)
+
+Start a web-based monitor to view the VNC session in real-time:
+
+```bash
+python .claude/skills/vnc-server/scripts/vnc_monitor.py
+```
+
+Then open http://localhost:8080 in your browser to watch the session.
+
+Options:
+- `--port 8080` - Web UI port (WebSocket uses port+1)
+- `--fps 10` - Target frame rate (default: 10)
+- `--host 127.0.0.1` - Bind address (localhost only by default for security)
+
+The monitor is **read-only** - it shows the screen but doesn't capture input. All interaction is done via the Claude Code scripts.
+
+### 7. Disconnect
 
 ```bash
 python .claude/skills/vnc-server/scripts/vnc_disconnect.py
@@ -166,6 +183,12 @@ The skill uses a background daemon architecture:
 - The daemon listens on a Unix socket for commands
 - Other scripts (`vnc_screenshot.py`, `vnc_mouse.py`, etc.) send commands to the daemon
 - This allows the connection to persist between operations
+
+The optional web monitor (`vnc_monitor.py`) provides real-time viewing:
+- Runs a local HTTP server serving a single-page web app
+- Streams frames via WebSocket to the browser
+- Restricted to localhost (127.0.0.1) by default for security
+- Read-only viewing - does not capture or forward mouse/keyboard input
 
 State files are stored in `/tmp/vnc_skill/`:
 - `session.json` - Current session information
