@@ -3,7 +3,7 @@
 VNC Session Monitor - Web-based viewer for monitoring VNC sessions
 
 Starts a local web server that streams the VNC session to a browser canvas
-via WebSocket. Restricted to localhost for security.
+via WebSocket. Both HTTP and WebSocket are served on the same port.
 
 Usage:
     python vnc_monitor.py [--port 8080] [--fps 10]
@@ -14,13 +14,10 @@ Then open http://localhost:8080 in your browser.
 import argparse
 import asyncio
 import base64
-import http.server
+import hashlib
 import json
-import os
 import signal
-import socketserver
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Set
@@ -45,17 +42,18 @@ MONITOR_HTML = '''<!DOCTYPE html>
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
-            padding: 20px;
+            padding: 10px;
         }
         h1 {
-            margin-bottom: 10px;
+            margin-bottom: 5px;
             color: #0f9;
+            font-size: 1.2em;
         }
         #status {
-            margin-bottom: 15px;
-            padding: 8px 16px;
+            margin-bottom: 8px;
+            padding: 4px 12px;
             border-radius: 4px;
-            font-size: 14px;
+            font-size: 12px;
         }
         #status.connected { background: #0a3; }
         #status.disconnected { background: #a30; }
@@ -65,45 +63,40 @@ MONITOR_HTML = '''<!DOCTYPE html>
             border-radius: 8px;
             overflow: hidden;
             box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            max-width: 100%;
+            max-height: calc(100vh - 120px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         #vnc-canvas {
             display: block;
             background: #000;
+            max-width: 100%;
+            max-height: calc(100vh - 120px);
+            object-fit: contain;
         }
         #stats {
-            margin-top: 15px;
-            font-size: 12px;
+            margin-top: 8px;
+            font-size: 11px;
             color: #888;
         }
         #controls {
-            margin-top: 15px;
+            margin-top: 8px;
             display: flex;
-            gap: 10px;
+            gap: 8px;
         }
         button {
-            padding: 8px 16px;
+            padding: 6px 12px;
             border: none;
             border-radius: 4px;
             background: #333;
             color: #fff;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 12px;
         }
         button:hover { background: #444; }
         button:active { background: #555; }
-        #info {
-            margin-top: 20px;
-            padding: 15px;
-            background: #222;
-            border-radius: 8px;
-            font-size: 13px;
-            max-width: 600px;
-        }
-        #info code {
-            background: #333;
-            padding: 2px 6px;
-            border-radius: 3px;
-        }
     </style>
 </head>
 <body>
@@ -118,16 +111,9 @@ MONITOR_HTML = '''<!DOCTYPE html>
         <span id="bandwidth">-- KB/s</span>
     </div>
     <div id="controls">
-        <button onclick="togglePause()">⏸ Pause</button>
-        <button onclick="takeSnapshot()">📷 Snapshot</button>
-        <button onclick="toggleFullscreen()">⛶ Fullscreen</button>
-    </div>
-    <div id="info">
-        <p>This is a <strong>read-only</strong> monitor for the VNC session.</p>
-        <p>The actual VNC interaction is done via Claude Code scripts.</p>
-        <p style="margin-top:10px; color:#666;">
-            Tip: Open browser DevTools (F12) to see frame timing details.
-        </p>
+        <button onclick="togglePause()">Pause</button>
+        <button onclick="takeSnapshot()">Snapshot</button>
+        <button onclick="toggleFullscreen()">Fullscreen</button>
     </div>
 
     <script>
@@ -143,6 +129,27 @@ MONITOR_HTML = '''<!DOCTYPE html>
         let frameCount = 0;
         let bytesReceived = 0;
         let lastStatsTime = Date.now();
+        let nativeWidth = 800;
+        let nativeHeight = 600;
+
+        function scaleCanvas() {
+            const maxW = window.innerWidth - 24;
+            const maxH = window.innerHeight - 120;
+            const aspect = nativeWidth / nativeHeight;
+
+            let w = maxW;
+            let h = w / aspect;
+
+            if (h > maxH) {
+                h = maxH;
+                w = h * aspect;
+            }
+
+            canvas.style.width = Math.floor(w) + 'px';
+            canvas.style.height = Math.floor(h) + 'px';
+        }
+
+        window.addEventListener('resize', scaleCanvas);
 
         function connect() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -151,13 +158,11 @@ MONITOR_HTML = '''<!DOCTYPE html>
             ws.onopen = () => {
                 statusEl.textContent = 'Connected';
                 statusEl.className = 'connected';
-                console.log('WebSocket connected');
             };
 
             ws.onclose = () => {
                 statusEl.textContent = 'Disconnected - Reconnecting...';
                 statusEl.className = 'disconnected';
-                console.log('WebSocket closed, reconnecting in 2s...');
                 setTimeout(connect, 2000);
             };
 
@@ -171,22 +176,22 @@ MONITOR_HTML = '''<!DOCTYPE html>
                 const data = JSON.parse(event.data);
 
                 if (data.type === 'frame') {
-                    // Update canvas size if needed
                     if (canvas.width !== data.width || canvas.height !== data.height) {
                         canvas.width = data.width;
                         canvas.height = data.height;
+                        nativeWidth = data.width;
+                        nativeHeight = data.height;
                         resolutionEl.textContent = `${data.width}x${data.height}`;
+                        scaleCanvas();
                     }
 
-                    // Draw the frame
                     const img = new Image();
                     img.onload = () => {
                         ctx.drawImage(img, 0, 0);
                         frameCount++;
                     };
                     img.src = 'data:image/png;base64,' + data.image;
-
-                    bytesReceived += data.image.length * 0.75; // Approximate decoded size
+                    bytesReceived += data.image.length * 0.75;
 
                 } else if (data.type === 'status') {
                     if (data.connected) {
@@ -196,24 +201,17 @@ MONITOR_HTML = '''<!DOCTYPE html>
                         statusEl.className = 'disconnected';
                     }
                 } else if (data.type === 'error') {
-                    console.error('Server error:', data.message);
                     statusEl.textContent = 'Error: ' + data.message;
                     statusEl.className = 'disconnected';
                 }
             };
         }
 
-        // Update stats every second
         setInterval(() => {
             const now = Date.now();
             const elapsed = (now - lastStatsTime) / 1000;
-
-            const fps = (frameCount / elapsed).toFixed(1);
-            const kbps = ((bytesReceived / 1024) / elapsed).toFixed(1);
-
-            fpsEl.textContent = `${fps} FPS`;
-            bandwidthEl.textContent = `${kbps} KB/s`;
-
+            fpsEl.textContent = `${(frameCount / elapsed).toFixed(1)} FPS`;
+            bandwidthEl.textContent = `${((bytesReceived / 1024) / elapsed).toFixed(0)} KB/s`;
             frameCount = 0;
             bytesReceived = 0;
             lastStatsTime = now;
@@ -221,7 +219,7 @@ MONITOR_HTML = '''<!DOCTYPE html>
 
         function togglePause() {
             paused = !paused;
-            event.target.textContent = paused ? '▶ Resume' : '⏸ Pause';
+            event.target.textContent = paused ? 'Resume' : 'Pause';
         }
 
         function takeSnapshot() {
@@ -233,52 +231,60 @@ MONITOR_HTML = '''<!DOCTYPE html>
 
         function toggleFullscreen() {
             if (!document.fullscreenElement) {
-                canvas.requestFullscreen();
+                document.getElementById('canvas-container').requestFullscreen();
             } else {
                 document.exitFullscreen();
             }
         }
 
-        // Start connection
         connect();
+        scaleCanvas();
     </script>
 </body>
 </html>
 '''
 
+# Simple HTTP response for the HTML page
+HTTP_RESPONSE_TEMPLATE = """HTTP/1.1 200 OK\r
+Content-Type: text/html; charset=utf-8\r
+Content-Length: {length}\r
+Connection: close\r
+\r
+"""
 
-class WebSocketServer:
-    """Simple WebSocket server implementation (RFC 6455)"""
+HTTP_404 = """HTTP/1.1 404 Not Found\r
+Content-Type: text/plain\r
+Content-Length: 9\r
+Connection: close\r
+\r
+Not Found"""
 
-    GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+class VNCMonitorServer:
+    """Combined HTTP + WebSocket server on a single port"""
+
+    WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
     def __init__(self, host: str, port: int, fps: float = 10):
         self.host = host
         self.port = port
         self.fps = fps
         self.frame_interval = 1.0 / fps
-        self.clients: Set[asyncio.StreamWriter] = set()
+        self.ws_clients: Set[asyncio.StreamWriter] = set()
         self.running = False
-        self._http_server = None
-        self._http_thread = None
 
     async def start(self):
-        """Start the WebSocket server"""
+        """Start the server"""
         self.running = True
 
-        # Start HTTP server for serving the HTML page
-        self._start_http_server()
-
-        # Start WebSocket server
         server = await asyncio.start_server(
             self._handle_connection,
             self.host,
-            self.port + 1,  # WebSocket on port+1
+            self.port,
         )
 
         print(f"VNC Monitor started!")
-        print(f"  Web UI: http://{self.host}:{self.port}")
-        print(f"  WebSocket: ws://{self.host}:{self.port + 1}/ws")
+        print(f"  URL: http://{self.host}:{self.port}")
         print(f"  Frame rate: {self.fps} FPS")
         print(f"\nOpen http://localhost:{self.port} in your browser to view the VNC session.")
 
@@ -288,116 +294,120 @@ class WebSocketServer:
         async with server:
             await server.serve_forever()
 
-    def _start_http_server(self):
-        """Start HTTP server in a separate thread"""
-
-        class MonitorHandler(http.server.BaseHTTPRequestHandler):
-            def log_message(self, format, *args):
-                pass  # Suppress logging
-
-            def do_GET(self):
-                if self.path == '/' or self.path == '/index.html':
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'text/html')
-                    self.end_headers()
-                    # Inject the correct WebSocket port
-                    html = MONITOR_HTML.replace(
-                        "location.host",
-                        f"'{self.server.server_address[0]}:{self.server.server_address[1] + 1}'"
-                    )
-                    self.wfile.write(html.encode())
-                else:
-                    self.send_error(404)
-
-        class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-            allow_reuse_address = True
-
-        self._http_server = ThreadedHTTPServer((self.host, self.port), MonitorHandler)
-        self._http_thread = threading.Thread(target=self._http_server.serve_forever)
-        self._http_thread.daemon = True
-        self._http_thread.start()
-
     async def _handle_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-        """Handle incoming WebSocket connection"""
+        """Handle incoming connection - route to HTTP or WebSocket"""
         try:
-            # Read HTTP request
-            request_line = await reader.readline()
-            headers = {}
-
-            while True:
-                line = await reader.readline()
-                if line == b'\r\n':
-                    break
-                if b':' in line:
-                    key, value = line.decode().split(':', 1)
-                    headers[key.strip().lower()] = value.strip()
-
-            # Verify WebSocket upgrade request
-            if headers.get('upgrade', '').lower() != 'websocket':
+            # Read the first line to determine request type
+            request_line = await asyncio.wait_for(reader.readline(), timeout=10)
+            if not request_line:
                 writer.close()
                 return
 
-            # Perform WebSocket handshake
-            key = headers.get('sec-websocket-key', '')
-            accept = self._compute_accept_key(key)
-
-            response = (
-                "HTTP/1.1 101 Switching Protocols\r\n"
-                "Upgrade: websocket\r\n"
-                "Connection: Upgrade\r\n"
-                f"Sec-WebSocket-Accept: {accept}\r\n"
-                "\r\n"
-            )
-            writer.write(response.encode())
-            await writer.drain()
-
-            # Add to clients
-            self.clients.add(writer)
-
-            # Send initial status
-            session = get_session()
-            if session:
-                await self._send_json(writer, {
-                    "type": "status",
-                    "connected": session.connected,
-                    "width": session.width,
-                    "height": session.height,
-                })
-
-            # Keep connection alive and handle incoming messages
-            try:
-                while self.running:
-                    # Read frames (for ping/pong handling)
-                    try:
-                        data = await asyncio.wait_for(reader.read(1024), timeout=30)
-                        if not data:
-                            break
-                        # Handle ping frames, close frames, etc.
-                        if len(data) >= 2:
-                            opcode = data[0] & 0x0F
-                            if opcode == 0x8:  # Close
-                                break
-                            elif opcode == 0x9:  # Ping
-                                await self._send_pong(writer, data)
-                    except asyncio.TimeoutError:
-                        # Send ping to keep alive
-                        await self._send_ping(writer)
-
-            except (ConnectionResetError, BrokenPipeError):
-                pass
-            finally:
-                self.clients.discard(writer)
+            request_line = request_line.decode('utf-8', errors='ignore').strip()
+            parts = request_line.split()
+            if len(parts) < 2:
                 writer.close()
+                return
 
+            method, path = parts[0], parts[1]
+
+            # Read headers
+            headers = {}
+            while True:
+                line = await reader.readline()
+                if line == b'\r\n' or line == b'\n' or not line:
+                    break
+                if b':' in line:
+                    key, value = line.decode('utf-8', errors='ignore').split(':', 1)
+                    headers[key.strip().lower()] = value.strip()
+
+            # Check if this is a WebSocket upgrade request
+            if headers.get('upgrade', '').lower() == 'websocket' and path == '/ws':
+                await self._handle_websocket(reader, writer, headers)
+            else:
+                await self._handle_http(writer, method, path)
+
+        except asyncio.TimeoutError:
+            pass
         except Exception as e:
             print(f"Connection error: {e}")
-            self.clients.discard(writer)
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except:
+                pass
+
+    async def _handle_http(self, writer: asyncio.StreamWriter, method: str, path: str):
+        """Handle HTTP request - serve the HTML page"""
+        if method == 'GET' and path in ('/', '/index.html'):
+            html_bytes = MONITOR_HTML.encode('utf-8')
+            response = HTTP_RESPONSE_TEMPLATE.format(length=len(html_bytes))
+            writer.write(response.encode('utf-8'))
+            writer.write(html_bytes)
+        else:
+            writer.write(HTTP_404.encode('utf-8'))
+
+        await writer.drain()
+
+    async def _handle_websocket(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, headers: dict):
+        """Handle WebSocket connection"""
+        # Perform WebSocket handshake
+        key = headers.get('sec-websocket-key', '')
+        accept = self._compute_accept_key(key)
+
+        response = (
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Accept: {accept}\r\n"
+            "\r\n"
+        )
+        writer.write(response.encode())
+        await writer.drain()
+
+        # Add to clients
+        self.ws_clients.add(writer)
+
+        # Send initial status
+        session = get_session()
+        if session:
+            await self._send_json(writer, {
+                "type": "status",
+                "connected": session.connected,
+                "width": session.width,
+                "height": session.height,
+            })
+
+        # Keep connection alive and handle incoming messages
+        try:
+            while self.running:
+                try:
+                    data = await asyncio.wait_for(reader.read(1024), timeout=30)
+                    if not data:
+                        break
+                    # Handle WebSocket control frames
+                    if len(data) >= 2:
+                        opcode = data[0] & 0x0F
+                        if opcode == 0x8:  # Close
+                            break
+                        elif opcode == 0x9:  # Ping
+                            await self._send_pong(writer)
+                except asyncio.TimeoutError:
+                    # Send ping to keep alive
+                    try:
+                        await self._send_ping(writer)
+                    except:
+                        break
+
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        finally:
+            self.ws_clients.discard(writer)
 
     def _compute_accept_key(self, key: str) -> str:
         """Compute Sec-WebSocket-Accept header value"""
-        import hashlib
-        import base64
-        combined = key + self.GUID
+        combined = key + self.WEBSOCKET_GUID
         sha1 = hashlib.sha1(combined.encode()).digest()
         return base64.b64encode(sha1).decode()
 
@@ -429,15 +439,14 @@ class WebSocketServer:
             writer.write(bytes(frame))
             await writer.drain()
         except (ConnectionResetError, BrokenPipeError):
-            self.clients.discard(writer)
+            self.ws_clients.discard(writer)
 
     async def _send_ping(self, writer: asyncio.StreamWriter):
         """Send WebSocket ping frame"""
         await self._send_frame(writer, b'ping', opcode=0x9)
 
-    async def _send_pong(self, writer: asyncio.StreamWriter, ping_frame: bytes):
+    async def _send_pong(self, writer: asyncio.StreamWriter):
         """Send WebSocket pong frame"""
-        # Extract payload from ping and send as pong
         await self._send_frame(writer, b'pong', opcode=0xA)
 
     async def _stream_frames(self):
@@ -445,19 +454,19 @@ class WebSocketServer:
         while self.running:
             start_time = time.time()
 
-            if self.clients:
+            if self.ws_clients:
                 # Check if VNC is connected
                 session = get_session()
                 if not session or not session.connected:
                     # Send disconnected status
-                    for client in list(self.clients):
+                    for client in list(self.ws_clients):
                         try:
                             await self._send_json(client, {
                                 "type": "status",
                                 "connected": False,
                             })
                         except:
-                            self.clients.discard(client)
+                            self.ws_clients.discard(client)
                 else:
                     # Capture screenshot
                     result = send_command({"command": "screenshot"})
@@ -478,11 +487,11 @@ class WebSocketServer:
                                     "image": image_b64,
                                 }
 
-                                for client in list(self.clients):
+                                for client in list(self.ws_clients):
                                     try:
                                         await self._send_json(client, frame_data)
                                     except:
-                                        self.clients.discard(client)
+                                        self.ws_clients.discard(client)
 
                                 # Clean up screenshot file
                                 try:
@@ -500,8 +509,6 @@ class WebSocketServer:
     def stop(self):
         """Stop the server"""
         self.running = False
-        if self._http_server:
-            self._http_server.shutdown()
 
 
 async def main():
@@ -509,7 +516,7 @@ async def main():
     parser.add_argument("--host", default="127.0.0.1",
                         help="Host to bind to (default: 127.0.0.1 for localhost only)")
     parser.add_argument("--port", "-p", type=int, default=8080,
-                        help="Port for web UI (WebSocket will be port+1)")
+                        help="Port for web UI and WebSocket")
     parser.add_argument("--fps", "-f", type=float, default=10,
                         help="Target frame rate (default: 10)")
 
@@ -532,7 +539,7 @@ async def main():
             "url": f"http://{args.host}:{args.port}"
         }))
 
-    server = WebSocketServer(args.host, args.port, args.fps)
+    server = VNCMonitorServer(args.host, args.port, args.fps)
 
     # Handle shutdown signals
     loop = asyncio.get_event_loop()

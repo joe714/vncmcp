@@ -92,7 +92,7 @@ python .claude/skills/vnc-server/scripts/vnc_monitor.py
 Then open http://localhost:8080 in your browser to watch the session.
 
 Options:
-- `--port 8080` - Web UI port (WebSocket uses port+1)
+- `--port 8080` - Web UI and WebSocket port (single port for SSH tunneling)
 - `--fps 10` - Target frame rate (default: 10)
 - `--host 127.0.0.1` - Bind address (localhost only by default for security)
 
@@ -142,14 +142,41 @@ python .claude/skills/vnc-server/scripts/vnc_disconnect.py
 5. Repeat for all fields
 6. Click submit button or press Enter
 
-## Tips for Finding Coordinates
+## Calculating Coordinates
 
-When you take a screenshot, the response includes the screen dimensions (width × height). To interact with UI elements:
+**Important:** The screenshot response includes the actual framebuffer dimensions (e.g., `"width": 1920, "height": 1080`). You must use coordinates based on these actual dimensions, NOT the scaled image dimensions you see when viewing screenshots.
 
-1. Take a screenshot and view it using the Read tool
-2. Estimate coordinates based on the visual layout
-3. Most screens are laid out with (0,0) at the top-left corner
-4. X increases to the right, Y increases downward
+### Coordinate Calculation
+
+1. Take a screenshot and note the dimensions from the response:
+   ```json
+   {"status": "ok", "width": 1920, "height": 1080, ...}
+   ```
+
+2. When viewing the screenshot image, it may be displayed at a smaller scale. Calculate coordinates relative to the **actual** dimensions returned in the response.
+
+3. Estimate target position as a percentage of the screen, then multiply by actual dimensions:
+   - If a button appears at roughly 50% from left and 40% from top:
+   - x = 0.50 × 1920 = 960
+   - y = 0.40 × 1080 = 432
+
+### Common Coordinate References (for 1920x1080 screen)
+
+| Location | Coordinates |
+|----------|-------------|
+| Top-left corner | (0, 0) |
+| Top-center | (960, 0) |
+| Screen center | (960, 540) |
+| Bottom-right corner | (1920, 1080) |
+| Typical taskbar (bottom) | (960, 1050) |
+
+### Tips for Accuracy
+
+1. **Start with obvious landmarks** - Desktop icons, taskbars, and window title bars have predictable positions
+2. **Take screenshots after each action** - Verify your click landed where expected
+3. **Click center of targets** - Aim for the middle of buttons and text fields
+4. **Account for window decorations** - Title bars, borders, and menus take up space
+5. **Use focus before typing** - Always click on a text field before sending keyboard input
 
 ## Error Handling
 
@@ -185,8 +212,8 @@ The skill uses a background daemon architecture:
 - This allows the connection to persist between operations
 
 The optional web monitor (`vnc_monitor.py`) provides real-time viewing:
-- Runs a local HTTP server serving a single-page web app
-- Streams frames via WebSocket to the browser
+- Serves both HTTP and WebSocket on a single port (SSH tunnel friendly)
+- Canvas auto-scales to fit browser viewport while maintaining aspect ratio
 - Restricted to localhost (127.0.0.1) by default for security
 - Read-only viewing - does not capture or forward mouse/keyboard input
 

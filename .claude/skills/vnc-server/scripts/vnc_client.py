@@ -362,7 +362,7 @@ class RFBClient:
         row_bytes = w * bytes_per_pixel
 
         for row in range(h):
-            data = await self.reader.read(row_bytes)
+            data = await self.reader.readexactly(row_bytes)
             offset = ((y + row) * self.width + x) * bytes_per_pixel
             if offset + row_bytes <= len(self.framebuffer):
                 self.framebuffer[offset:offset + row_bytes] = data
@@ -455,38 +455,57 @@ class RFBClient:
 
         return make_png()
 
-    async def send_key_event(self, key: int, down: bool):
+    async def send_key_event(self, key: int, down: bool) -> bool:
         """Send a key press/release event"""
         if not self.connected:
-            return
+            print(f"[DEBUG] send_key_event: NOT CONNECTED (key=0x{key:04x}, down={down})", file=sys.stderr)
+            return False
 
-        async with self._lock:
-            msg = struct.pack("!BBHI", self.MSG_KEY_EVENT, 1 if down else 0, 0, key)
-            self.writer.write(msg)
-            await self.writer.drain()
+        try:
+            async with self._lock:
+                msg = struct.pack("!BBHI", self.MSG_KEY_EVENT, 1 if down else 0, 0, key)
+                print(f"[DEBUG] send_key_event: key=0x{key:04x} ({chr(key) if 0x20 <= key <= 0x7e else 'special'}), down={down}, msg={msg.hex()}", file=sys.stderr)
+                self.writer.write(msg)
+                await self.writer.drain()
+                print(f"[DEBUG] send_key_event: sent successfully", file=sys.stderr)
+                return True
+        except Exception as e:
+            print(f"[DEBUG] send_key_event: ERROR - {e}", file=sys.stderr)
+            return False
 
-    async def send_pointer_event(self, x: int, y: int, buttons: int):
+    async def send_pointer_event(self, x: int, y: int, buttons: int) -> bool:
         """Send a mouse pointer event"""
         if not self.connected:
-            return
+            print(f"[DEBUG] send_pointer_event: NOT CONNECTED (x={x}, y={y}, buttons={buttons})", file=sys.stderr)
+            return False
 
-        async with self._lock:
-            msg = struct.pack("!BBHH", self.MSG_POINTER_EVENT, buttons, x, y)
-            self.writer.write(msg)
-            await self.writer.drain()
+        try:
+            async with self._lock:
+                msg = struct.pack("!BBHH", self.MSG_POINTER_EVENT, buttons, x, y)
+                print(f"[DEBUG] send_pointer_event: x={x}, y={y}, buttons={buttons}, msg={msg.hex()}", file=sys.stderr)
+                self.writer.write(msg)
+                await self.writer.drain()
+                print(f"[DEBUG] send_pointer_event: sent successfully", file=sys.stderr)
+                return True
+        except Exception as e:
+            print(f"[DEBUG] send_pointer_event: ERROR - {e}", file=sys.stderr)
+            return False
 
     async def type_text(self, text: str):
         """Type a string of text"""
-        for char in text:
+        print(f"[DEBUG] type_text: typing '{text}' ({len(text)} chars)", file=sys.stderr)
+        for i, char in enumerate(text):
             keysym = ord(char)
             # Handle special characters
             if keysym < 0x20 or keysym > 0x7e:
                 keysym = self._char_to_keysym(char)
 
+            print(f"[DEBUG] type_text: char[{i}]='{char}' (keysym=0x{keysym:04x})", file=sys.stderr)
             await self.send_key_event(keysym, True)
             await asyncio.sleep(0.02)
             await self.send_key_event(keysym, False)
             await asyncio.sleep(0.02)
+        print(f"[DEBUG] type_text: done typing", file=sys.stderr)
 
     def _char_to_keysym(self, char: str) -> int:
         """Convert character to X11 keysym"""
@@ -650,11 +669,17 @@ class VNCDaemon:
                 return
 
             request = json.loads(data.decode('utf-8'))
+            print(f"[DEBUG] _handle_client: received command: {request}", file=sys.stderr)
+            print(f"[DEBUG] _handle_client: client.connected={self.client.connected if self.client else 'No client'}", file=sys.stderr)
             response = await self._process_command(request)
+            print(f"[DEBUG] _handle_client: response: {response}", file=sys.stderr)
 
             writer.write(json.dumps(response).encode('utf-8'))
             await writer.drain()
         except Exception as e:
+            print(f"[DEBUG] _handle_client: ERROR - {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
             error_response = {"error": str(e)}
             writer.write(json.dumps(error_response).encode('utf-8'))
             await writer.drain()
